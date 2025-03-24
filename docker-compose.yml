@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # Backend API service
+  backend:
+    build: ./petshop-backend
+    container_name: petshop-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - petshop-network
+
+  # Frontend React application
+  frontend:
+    build: ./petshop-frontend
+    container_name: petshop-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - petshop-network
+
+networks:
+  petshop-network:
+    driver: bridge
