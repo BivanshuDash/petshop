@@ -106,15 +106,22 @@ app.get('/api/products/category/:categoryName', (req, res) => {
 // Mock cart functionality
 let cart = [];
 
+// Enhanced cart endpoints with logging
 app.get('/api/cart', (req, res) => {
+  console.log('GET /api/cart - Current cart items:', cart.length);
   res.json(cart);
 });
 
 app.post('/api/cart', (req, res) => {
   const { productId, quantity } = req.body;
+  console.log(`POST /api/cart - Adding product ID: ${productId}, quantity: ${quantity}`);
+  
   const product = products.find(p => p.id === parseInt(productId));
   
-  if (!product) return res.status(404).json({ message: 'Product not found' });
+  if (!product) {
+    console.log(`Product ID ${productId} not found`);
+    return res.status(404).json({ message: 'Product not found' });
+  }
   
   const cartItem = {
     id: Date.now(),
@@ -126,18 +133,25 @@ app.post('/api/cart', (req, res) => {
   };
   
   cart.push(cartItem);
+  console.log(`Added to cart - Item ID: ${cartItem.id}, Name: ${cartItem.name}`);
+  console.log(`Current cart now has ${cart.length} items`);
+  
   res.status(201).json(cartItem);
 });
 
 app.delete('/api/cart/:id', (req, res) => {
   const itemId = parseInt(req.params.id);
+  console.log(`DELETE /api/cart/${itemId} - Removing item from cart`);
+  
   const initialLength = cart.length;
   cart = cart.filter(item => item.id !== itemId);
   
   if (cart.length === initialLength) {
+    console.log(`Item ID ${itemId} not found in cart`);
     return res.status(404).json({ message: 'Cart item not found' });
   }
   
+  console.log(`Removed item ID: ${itemId}. Cart now has ${cart.length} items`);
   res.json({ message: 'Item removed from cart' });
 });
 
