@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petshop-frontend
+  namespace: petshop
+  labels:
+    app: petshop-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petshop-frontend
+  template:
+    metadata:
+      labels:
+        app: petshop-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: petshop-frontend:latest
+        imagePullPolicy: IfNotPresent  # Use local image if available
+        ports:
+        - containerPort: 80
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petshop-frontend
+  namespace: petshop
+spec:
+  selector:
+    app: petshop-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: NodePort  # Exposed outside the cluster via node port

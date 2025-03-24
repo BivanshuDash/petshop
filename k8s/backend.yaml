@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petshop-backend
+  namespace: petshop
+  labels:
+    app: petshop-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petshop-backend
+  template:
+    metadata:
+      labels:
+        app: petshop-backend
+    spec:
+      containers:
+      - name: backend
+        image: petshop-backend:latest
+        imagePullPolicy: IfNotPresent  # Use local image if available
+        ports:
+        - containerPort: 5000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petshop-backend
+  namespace: petshop
+spec:
+  selector:
+    app: petshop-backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: ClusterIP  # Internal service - accessed only within the cluster
