@@ -58,30 +58,15 @@ jobs:
             echo "⚠️ Frontend package-lock.json not found"
           fi
       
-      # Install dependencies and run tests for backend with fallback
-      - name: Install backend dependencies and test
+      # Install dependencies and run tests for backend
+      - name: Install backend dependencies
         working-directory: ./petshop-backend
-        run: |
-          # Add verbose logging for better error messages
-          npm ci --verbose || {
-            echo "npm ci failed, showing package-lock.json information:"
-            cat package-lock.json | grep -m 1 "lockfileVersion"
-            echo "Falling back to npm install"
-            npm install
-          }
-          npm test
+        run: npm install && npm test
       
-      # Install dependencies and run tests for frontend with fallback
-      - name: Install frontend dependencies and test
+      # Install dependencies and run tests for frontend
+      - name: Install frontend dependencies
         working-directory: ./petshop-frontend
-        run: |
-          if [ -f "package-lock.json" ]; then
-            npm ci
-          else
-            echo "No package-lock.json found, using npm install instead"
-            npm install
-          fi
-          npm test
+        run: npm install && npm test
       
       # Build and tag Docker images
       - name: Build Docker images
