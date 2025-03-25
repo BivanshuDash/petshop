@@ -1,6 +1,10 @@
 pipeline {
     agent any
     
+    tools {
+        nodejs "Node 18.x"  // Use the name you specified in Global Tool Configuration
+    }
+    
     environment {
         DOCKER_HUB_CREDS = credentials('docker-hub-credentials')
         DOCKER_HUB_USERNAME = "${DOCKER_HUB_CREDS_USR}"
@@ -13,6 +17,13 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+            }
+        }
+        
+        stage('Verify Tools') {
+            steps {
+                sh 'node --version'
+                sh 'npm --version'
             }
         }
         
@@ -41,7 +52,7 @@ pipeline {
                 stage('Backend Tests') {
                     steps {
                         dir('petshop-backend') {
-                            sh 'npm test'
+                            bat 'npm test'
                         }
                     }
                 }
@@ -49,7 +60,7 @@ pipeline {
                 stage('Frontend Tests') {
                     steps {
                         dir('petshop-frontend') {
-                            sh 'npm test'
+                            bat 'npm test'
                         }
                     }
                 }
@@ -58,18 +69,20 @@ pipeline {
         
         stage('Build Docker Images') {
             steps {
-                sh "docker build -t ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG} -t ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:latest ./petshop-backend"
-                sh "docker build -t ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG} -t ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:latest ./petshop-frontend"
+                bat "docker build -t %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:%IMAGE_TAG% -t %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:latest ./petshop-backend"
+                bat "docker build -t %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:%IMAGE_TAG% -t %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:latest ./petshop-frontend"
             }
         }
         
         stage('Push Docker Images') {
             steps {
-                sh "echo ${DOCKER_HUB_CREDS_PSW} | docker login -u ${DOCKER_HUB_USERNAME} --password-stdin"
-                sh "docker push ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}"
-                sh "docker push ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:latest"
-                sh "docker push ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
-                sh "docker push ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:latest"
+                withCredentials([string(credentialsId: 'docker-hub-credentials', variable: 'DOCKER_PWD')]) {
+                    bat "docker login -u %DOCKER_HUB_USERNAME% -p %DOCKER_PWD%"
+                }
+                bat "docker push %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:%IMAGE_TAG%"
+                bat "docker push %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:latest"
+                bat "docker push %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:%IMAGE_TAG%"
+                bat "docker push %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:latest"
             }
         }
         
@@ -77,10 +90,10 @@ pipeline {
             steps {
                 script {
                     // Create directory for manifests
-                    sh "mkdir -p kubernetes-manifests"
+                    bat "mkdir kubernetes-manifests 2>NUL || echo Directory already exists"
                     
                     // Copy existing manifests if they exist
-                    sh "cp -r ./k8s/* kubernetes-manifests/ || echo 'No k8s directory found'"
+                    bat "xcopy /E /Y /I .\\k8s\\* kubernetes-manifests\\ 2>NUL || echo No k8s directory found"
                     
                     // Create namespace.yaml if it doesn't exist
                     if (!fileExists('kubernetes-manifests/namespace.yaml')) {
@@ -178,9 +191,11 @@ pipeline {
                         """.stripIndent()
                     }
                     
-                    // Update image tags in the manifests
-                    sh "sed -i 's|image: petshop-backend:latest|image: ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}|g' kubernetes-manifests/backend.yaml"
-                    sh "sed -i 's|image: petshop-frontend:latest|image: ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}|g' kubernetes-manifests/frontend.yaml"
+                    // Update image tags in the manifests - using PowerShell for this
+                    powershell """
+                        (Get-Content kubernetes-manifests/backend.yaml) -replace 'image: petshop-backend:latest', 'image: ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}' | Set-Content kubernetes-manifests/backend.yaml
+                        (Get-Content kubernetes-manifests/frontend.yaml) -replace 'image: petshop-frontend:latest', 'image: ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}' | Set-Content kubernetes-manifests/frontend.yaml
+                    """
                 }
             }
         }
@@ -194,17 +209,19 @@ pipeline {
             steps {
                 script {
                     try {
-                        // Try to deploy to Kubernetes
-                        sh "kubectl create namespace petshop --dry-run=client -o yaml | kubectl apply -f -"
-                        sh "kubectl apply -f kubernetes-manifests/namespace.yaml || echo 'No namespace.yaml found'"
-                        sh "kubectl apply -f kubernetes-manifests/backend.yaml || echo 'No backend.yaml found'"
-                        sh "kubectl apply -f kubernetes-manifests/frontend.yaml || echo 'No frontend.yaml found'"
-                        sh "kubectl rollout status deployment/petshop-backend -n petshop --timeout=300s || echo 'Backend deployment not ready'"
-                        sh "kubectl rollout status deployment/petshop-frontend -n petshop --timeout=300s || echo 'Frontend deployment not ready'"
+                        // Try to deploy to Kubernetes with PowerShell
+                        powershell """
+                            kubectl create namespace petshop --dry-run=client -o yaml | kubectl apply -f -
+                            kubectl apply -f kubernetes-manifests/namespace.yaml
+                            kubectl apply -f kubernetes-manifests/backend.yaml
+                            kubectl apply -f kubernetes-manifests/frontend.yaml
+                            kubectl rollout status deployment/petshop-backend -n petshop --timeout=300s
+                            kubectl rollout status deployment/petshop-frontend -n petshop --timeout=300s
+                        """
                         
-                        // Find service information
-                        def nodePort = sh(
-                            script: "kubectl get -o jsonpath='{.spec.ports[0].nodePort}' services petshop-frontend -n petshop || echo 'NodePort not available'",
+                        // Get NodePort information
+                        def nodePort = powershell(
+                            script: "kubectl get -o jsonpath='{.spec.ports[0].nodePort}' services petshop-frontend -n petshop",
                             returnStdout: true
                         ).trim()
                         
@@ -224,10 +241,10 @@ pipeline {
     post {
         always {
             // Clean up Docker images to save space
-            sh "docker rmi ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG} || true"
-            sh "docker rmi ${DOCKER_HUB_USERNAME}/${BACKEND_IMAGE_NAME}:latest || true"
-            sh "docker rmi ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG} || true"
-            sh "docker rmi ${DOCKER_HUB_USERNAME}/${FRONTEND_IMAGE_NAME}:latest || true"
+            bat "docker rmi %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:%IMAGE_TAG% || echo Image cleanup skipped"
+            bat "docker rmi %DOCKER_HUB_USERNAME%/%BACKEND_IMAGE_NAME%:latest || echo Image cleanup skipped"
+            bat "docker rmi %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:%IMAGE_TAG% || echo Image cleanup skipped"
+            bat "docker rmi %DOCKER_HUB_USERNAME%/%FRONTEND_IMAGE_NAME%:latest || echo Image cleanup skipped"
         }
         
         success {
@@ -238,4 +255,6 @@ pipeline {
             echo "Pipeline failed! 😢"
         }
     }
-}
+}    
+
+    
