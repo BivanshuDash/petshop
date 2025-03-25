@@ -18,19 +18,12 @@ spec:
       containers:
       - name: backend
         image: petshop-backend:latest
-        imagePullPolicy: IfNotPresent  # Use local image if available
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
         env:
         - name: NODE_ENV
           value: "production"
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "512Mi"
-          requests:
-            cpu: "200m"
-            memory: "256Mi"
 ---
 apiVersion: v1
 kind: Service

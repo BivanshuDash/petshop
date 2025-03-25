@@ -1,0 +1,177 @@
+name: PetShop CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  # Allow manual triggering
+  workflow_dispatch:
+
+env:
+  # Update with your Docker Hub username
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  BACKEND_IMAGE_NAME: petshop-backend
+  FRONTEND_IMAGE_NAME: petshop-frontend
+  # Tag with GitHub SHA for unique versioning
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      # Set up Node.js for testing
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            petshop-frontend/package-lock.json
+            petshop-backend/package-lock.json
+      
+      # Install dependencies and run tests for backend
+      - name: Install backend dependencies and test
+        working-directory: ./petshop-backend
+        run: |
+          npm ci
+          npm test
+      
+      # Install dependencies and run tests for frontend
+      - name: Install frontend dependencies and test
+        working-directory: ./petshop-frontend
+        run: |
+          npm ci
+          npm test
+      
+      # Build and tag Docker images
+      - name: Build Docker images
+        run: |
+          docker build -t $DOCKER_HUB_USERNAME/$BACKEND_IMAGE_NAME:$IMAGE_TAG -t $DOCKER_HUB_USERNAME/$BACKEND_IMAGE_NAME:latest ./petshop-backend
+          docker build -t $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:$IMAGE_TAG -t $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:latest ./petshop-frontend
+      
+      # Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      
+      # Push images to Docker Hub
+      - name: Push Docker images
+        run: |
+          docker push $DOCKER_HUB_USERNAME/$BACKEND_IMAGE_NAME:$IMAGE_TAG
+          docker push $DOCKER_HUB_USERNAME/$BACKEND_IMAGE_NAME:latest
+          docker push $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:$IMAGE_TAG
+          docker push $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:latest
+      
+      # Save Kubernetes manifests as artifacts
+      - name: Package Kubernetes manifests
+        run: |
+          mkdir -p kubernetes-manifests
+          cp -r ./k8s/* kubernetes-manifests/ || echo "No k8s directory found"
+          
+          # Update image tags in the Kubernetes manifests
+          if [ -f "kubernetes-manifests/backend.yaml" ]; then
+            sed -i "s|image: petshop-backend:latest|image: $DOCKER_HUB_USERNAME/$BACKEND_IMAGE_NAME:$IMAGE_TAG|g" kubernetes-manifests/backend.yaml
+          fi
+          
+          if [ -f "kubernetes-manifests/frontend.yaml" ]; then
+            sed -i "s|image: petshop-frontend:latest|image: $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:$IMAGE_TAG|g" kubernetes-manifests/frontend.yaml
+          fi
+      
+      - name: Upload Kubernetes manifests
+        uses: actions/upload-artifact@v3
+        with:
+          name: kubernetes-manifests
+          path: kubernetes-manifests/
+
+  deploy:
+    name: Deploy to Kubernetes
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    # Only deploy on main/master branch pushes, not on PRs
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      # Download the Kubernetes manifests artifact
+      - name: Download Kubernetes manifests
+        uses: actions/download-artifact@v3
+        with:
+          name: kubernetes-manifests
+          path: kubernetes-manifests
+      
+      # Set up kubectl
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        
+      # Deploy to Kubernetes (for demo/testing, we'll use kubectl directly)
+      # In a real production environment, you might want to use a tool like ArgoCD/Flux
+      - name: Deploy to Kubernetes
+        run: |
+          # In a real environment, you would configure kubectl to connect to your cluster here
+          # For GitHub Actions, you would typically use a secret to store your kubeconfig
+          
+          # Create namespace if it doesn't exist
+          kubectl create namespace petshop --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Apply the Kubernetes manifests
+          kubectl apply -f kubernetes-manifests/namespace.yaml || echo "No namespace.yaml found"
+          kubectl apply -f kubernetes-manifests/backend.yaml || echo "No backend.yaml found"
+          kubectl apply -f kubernetes-manifests/frontend.yaml || echo "No frontend.yaml found"
+          
+          # Wait for deployments to be ready
+          kubectl rollout status deployment/petshop-backend -n petshop --timeout=300s || echo "Backend deployment not ready"
+          kubectl rollout status deployment/petshop-frontend -n petshop --timeout=300s || echo "Frontend deployment not ready"
+        env:
+          # For a real setup, you'd use a kubeconfig stored in a GitHub secret
+          KUBECONFIG: ${{ secrets.KUBECONFIG }}
+
+  notify:
+    name: Notify Deployment Status
+    needs: [build-and-test, deploy]
+    runs-on: ubuntu-latest
+    # Run even if the previous job fails
+    if: always()
+    
+    steps:
+      - name: Check build status
+        id: build-status
+        run: |
+          if [ "${{ needs.build-and-test.result }}" == "success" ]; then
+            echo "BUILD_STATUS=✅ Build and test passed" >> $GITHUB_ENV
+          else
+            echo "BUILD_STATUS=❌ Build or test failed" >> $GITHUB_ENV
+          fi
+      
+      - name: Check deploy status
+        id: deploy-status
+        run: |
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "DEPLOY_STATUS=✅ Deployment successful" >> $GITHUB_ENV
+          elif [ "${{ needs.deploy.result }}" == "skipped" ]; then
+            echo "DEPLOY_STATUS=⏭️ Deployment skipped (PR)" >> $GITHUB_ENV
+          else
+            echo "DEPLOY_STATUS=❌ Deployment failed" >> $GITHUB_ENV
+          fi
+      
+      # For GitHub, a simple summary is sufficient, but in a real setup 
+      # you might want to send notifications to Slack, email, etc.
+      - name: Post deployment summary
+        run: |
+          echo "# 🚀 Deployment Summary for Commit ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ env.BUILD_STATUS }}" >> $GITHUB_STEP_SUMMARY
+          echo "- ${{ env.DEPLOY_STATUS }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Images pushed to Docker Hub:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.DOCKER_HUB_USERNAME }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.DOCKER_HUB_USERNAME }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
