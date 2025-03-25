@@ -30,23 +30,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: |
-            petshop-frontend/package-lock.json
-            petshop-backend/package-lock.json
       
-      # Install dependencies and run tests for backend
+      # Install dependencies and run tests for backend with fallback
       - name: Install backend dependencies and test
         working-directory: ./petshop-backend
         run: |
-          npm ci
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            echo "No package-lock.json found, using npm install instead"
+            npm install
+          fi
           npm test
       
-      # Install dependencies and run tests for frontend
+      # Install dependencies and run tests for frontend with fallback
       - name: Install frontend dependencies and test
         working-directory: ./petshop-frontend
         run: |
-          npm ci
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            echo "No package-lock.json found, using npm install instead"
+            npm install
+          fi
           npm test
       
       # Build and tag Docker images
@@ -75,6 +81,102 @@ jobs:
         run: |
           mkdir -p kubernetes-manifests
           cp -r ./k8s/* kubernetes-manifests/ || echo "No k8s directory found"
+          
+          # Create k8s directory if it doesn't exist
+          if [ ! -d "kubernetes-manifests" ] || [ -z "$(ls -A kubernetes-manifests)" ]; then
+            echo "Creating default Kubernetes manifests"
+            mkdir -p kubernetes-manifests
+            
+            # Create namespace.yaml
+            cat > kubernetes-manifests/namespace.yaml <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: petshop
+  labels:
+    name: petshop
+EOF
+            
+            # Create backend.yaml
+            cat > kubernetes-manifests/backend.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petshop-backend
+  namespace: petshop
+  labels:
+    app: petshop-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petshop-backend
+  template:
+    metadata:
+      labels:
+        app: petshop-backend
+    spec:
+      containers:
+      - name: backend
+        image: petshop-backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petshop-backend
+  namespace: petshop
+spec:
+  selector:
+    app: petshop-backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+  type: ClusterIP
+EOF
+            
+            # Create frontend.yaml
+            cat > kubernetes-manifests/frontend.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: petshop-frontend
+  namespace: petshop
+  labels:
+    app: petshop-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: petshop-frontend
+  template:
+    metadata:
+      labels:
+        app: petshop-frontend
+    spec:
+      containers:
+      - name: frontend
+        image: petshop-frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: petshop-frontend
+  namespace: petshop
+spec:
+  selector:
+    app: petshop-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+  type: LoadBalancer
+EOF
+          fi
           
           # Update image tags in the Kubernetes manifests
           if [ -f "kubernetes-manifests/backend.yaml" ]; then
@@ -113,22 +215,27 @@ jobs:
       - name: Set up kubectl
         uses: azure/setup-kubectl@v3
         
-      # Deploy to Kubernetes (for demo/testing, we'll use kubectl directly)
-      # In a real production environment, you might want to use a tool like ArgoCD/Flux
+      # Deploy to Kubernetes
       - name: Deploy to Kubernetes
         run: |
-          # In a real environment, you would configure kubectl to connect to your cluster here
-          # For GitHub Actions, you would typically use a secret to store your kubeconfig
+          # For local testing without a real cluster, just print the commands
+          if [ -z "$KUBECONFIG" ]; then
+            echo "No KUBECONFIG found, skipping actual deployment"
+            echo "Would execute:"
+            echo "kubectl create namespace petshop --dry-run=client -o yaml | kubectl apply -f -"
+            echo "kubectl apply -f kubernetes-manifests/namespace.yaml"
+            echo "kubectl apply -f kubernetes-manifests/backend.yaml"
+            echo "kubectl apply -f kubernetes-manifests/frontend.yaml"
+            echo "kubectl rollout status deployment/petshop-backend -n petshop --timeout=300s"
+            echo "kubectl rollout status deployment/petshop-frontend -n petshop --timeout=300s"
+            exit 0
+          fi
           
-          # Create namespace if it doesn't exist
+          # In a real environment with KUBECONFIG available:
           kubectl create namespace petshop --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Apply the Kubernetes manifests
           kubectl apply -f kubernetes-manifests/namespace.yaml || echo "No namespace.yaml found"
           kubectl apply -f kubernetes-manifests/backend.yaml || echo "No backend.yaml found"
           kubectl apply -f kubernetes-manifests/frontend.yaml || echo "No frontend.yaml found"
-          
-          # Wait for deployments to be ready
           kubectl rollout status deployment/petshop-backend -n petshop --timeout=300s || echo "Backend deployment not ready"
           kubectl rollout status deployment/petshop-frontend -n petshop --timeout=300s || echo "Frontend deployment not ready"
         env:
@@ -139,7 +246,6 @@ jobs:
     name: Notify Deployment Status
     needs: [build-and-test, deploy]
     runs-on: ubuntu-latest
-    # Run even if the previous job fails
     if: always()
     
     steps:
@@ -163,8 +269,6 @@ jobs:
             echo "DEPLOY_STATUS=❌ Deployment failed" >> $GITHUB_ENV
           fi
       
-      # For GitHub, a simple summary is sufficient, but in a real setup 
-      # you might want to send notifications to Slack, email, etc.
       - name: Post deployment summary
         run: |
           echo "# 🚀 Deployment Summary for Commit ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
