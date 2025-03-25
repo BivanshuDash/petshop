@@ -30,17 +30,45 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+    
+      # Add this step before installing dependencies
+      - name: Check npm version
+        run: |
+          echo "Current npm version: $(npm --version)"
+          # Uncomment and set this to the version you used locally
+          # npm install -g npm@8.x
+      
+      - name: Validate package-lock.json files
+        run: |
+          # Check if backend package-lock.json exists and is valid JSON
+          if [ -f "./petshop-backend/package-lock.json" ]; then
+            echo "Validating backend package-lock.json..."
+            jq '.' ./petshop-backend/package-lock.json > /dev/null && echo "✅ Valid JSON" || echo "❌ Invalid JSON"
+            echo "Lock file version: $(jq '.lockfileVersion' ./petshop-backend/package-lock.json)"
+          else
+            echo "⚠️ Backend package-lock.json not found"
+          fi
+          
+          # Check if frontend package-lock.json exists and is valid JSON
+          if [ -f "./petshop-frontend/package-lock.json" ]; then
+            echo "Validating frontend package-lock.json..."
+            jq '.' ./petshop-frontend/package-lock.json > /dev/null && echo "✅ Valid JSON" || echo "❌ Invalid JSON"
+            echo "Lock file version: $(jq '.lockfileVersion' ./petshop-frontend/package-lock.json)"
+          else
+            echo "⚠️ Frontend package-lock.json not found"
+          fi
       
       # Install dependencies and run tests for backend with fallback
       - name: Install backend dependencies and test
         working-directory: ./petshop-backend
         run: |
-          if [ -f "package-lock.json" ]; then
-            npm ci
-          else
-            echo "No package-lock.json found, using npm install instead"
+          # Add verbose logging for better error messages
+          npm ci --verbose || {
+            echo "npm ci failed, showing package-lock.json information:"
+            cat package-lock.json | grep -m 1 "lockfileVersion"
+            echo "Falling back to npm install"
             npm install
-          fi
+          }
           npm test
       
       # Install dependencies and run tests for frontend with fallback
