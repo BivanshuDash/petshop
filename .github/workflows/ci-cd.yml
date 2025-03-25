@@ -76,106 +76,107 @@ jobs:
           docker push $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:$IMAGE_TAG
           docker push $DOCKER_HUB_USERNAME/$FRONTEND_IMAGE_NAME:latest
       
-      # Save Kubernetes manifests as artifacts
-      - name: Package Kubernetes manifests
+      # Create K8s manifests if they don't exist and update image tags
+      - name: Create and update Kubernetes manifests
         run: |
           mkdir -p kubernetes-manifests
-          cp -r ./k8s/* kubernetes-manifests/ || echo "No k8s directory found"
           
-          # Create k8s directory if it doesn't exist
-          if [ ! -d "kubernetes-manifests" ] || [ -z "$(ls -A kubernetes-manifests)" ]; then
-            echo "Creating default Kubernetes manifests"
-            mkdir -p kubernetes-manifests
-            
-            # Create namespace.yaml
-            cat > kubernetes-manifests/namespace.yaml <<EOF
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: petshop
-  labels:
-    name: petshop
-EOF
-            
-            # Create backend.yaml
-            cat > kubernetes-manifests/backend.yaml <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: petshop-backend
-  namespace: petshop
-  labels:
-    app: petshop-backend
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: petshop-backend
-  template:
-    metadata:
-      labels:
-        app: petshop-backend
-    spec:
-      containers:
-      - name: backend
-        image: petshop-backend:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 5000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: petshop-backend
-  namespace: petshop
-spec:
-  selector:
-    app: petshop-backend
-  ports:
-  - port: 5000
-    targetPort: 5000
-  type: ClusterIP
-EOF
-            
-            # Create frontend.yaml
-            cat > kubernetes-manifests/frontend.yaml <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: petshop-frontend
-  namespace: petshop
-  labels:
-    app: petshop-frontend
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: petshop-frontend
-  template:
-    metadata:
-      labels:
-        app: petshop-frontend
-    spec:
-      containers:
-      - name: frontend
-        image: petshop-frontend:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 80
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: petshop-frontend
-  namespace: petshop
-spec:
-  selector:
-    app: petshop-frontend
-  ports:
-  - port: 80
-    targetPort: 80
-  type: LoadBalancer
-EOF
+          # Copy existing manifests if they exist
+          if [ -d "./k8s" ]; then
+            cp -r ./k8s/* kubernetes-manifests/ || echo "Failed to copy k8s files"
+          fi
+          
+          # Create namespace.yaml if it doesn't exist
+          if [ ! -f "kubernetes-manifests/namespace.yaml" ]; then
+            echo "Creating namespace.yaml"
+            echo "apiVersion: v1" > kubernetes-manifests/namespace.yaml
+            echo "kind: Namespace" >> kubernetes-manifests/namespace.yaml
+            echo "metadata:" >> kubernetes-manifests/namespace.yaml
+            echo "  name: petshop" >> kubernetes-manifests/namespace.yaml
+            echo "  labels:" >> kubernetes-manifests/namespace.yaml
+            echo "    name: petshop" >> kubernetes-manifests/namespace.yaml
+          fi
+          
+          # Create backend.yaml if it doesn't exist
+          if [ ! -f "kubernetes-manifests/backend.yaml" ]; then
+            echo "Creating backend.yaml"
+            echo "apiVersion: apps/v1" > kubernetes-manifests/backend.yaml
+            echo "kind: Deployment" >> kubernetes-manifests/backend.yaml
+            echo "metadata:" >> kubernetes-manifests/backend.yaml
+            echo "  name: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "  namespace: petshop" >> kubernetes-manifests/backend.yaml
+            echo "  labels:" >> kubernetes-manifests/backend.yaml
+            echo "    app: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "spec:" >> kubernetes-manifests/backend.yaml
+            echo "  replicas: 1" >> kubernetes-manifests/backend.yaml
+            echo "  selector:" >> kubernetes-manifests/backend.yaml
+            echo "    matchLabels:" >> kubernetes-manifests/backend.yaml
+            echo "      app: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "  template:" >> kubernetes-manifests/backend.yaml
+            echo "    metadata:" >> kubernetes-manifests/backend.yaml
+            echo "      labels:" >> kubernetes-manifests/backend.yaml
+            echo "        app: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "    spec:" >> kubernetes-manifests/backend.yaml
+            echo "      containers:" >> kubernetes-manifests/backend.yaml
+            echo "      - name: backend" >> kubernetes-manifests/backend.yaml
+            echo "        image: petshop-backend:latest" >> kubernetes-manifests/backend.yaml
+            echo "        imagePullPolicy: Always" >> kubernetes-manifests/backend.yaml
+            echo "        ports:" >> kubernetes-manifests/backend.yaml
+            echo "        - containerPort: 5000" >> kubernetes-manifests/backend.yaml
+            echo "---" >> kubernetes-manifests/backend.yaml
+            echo "apiVersion: v1" >> kubernetes-manifests/backend.yaml
+            echo "kind: Service" >> kubernetes-manifests/backend.yaml
+            echo "metadata:" >> kubernetes-manifests/backend.yaml
+            echo "  name: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "  namespace: petshop" >> kubernetes-manifests/backend.yaml
+            echo "spec:" >> kubernetes-manifests/backend.yaml
+            echo "  selector:" >> kubernetes-manifests/backend.yaml
+            echo "    app: petshop-backend" >> kubernetes-manifests/backend.yaml
+            echo "  ports:" >> kubernetes-manifests/backend.yaml
+            echo "  - port: 5000" >> kubernetes-manifests/backend.yaml
+            echo "    targetPort: 5000" >> kubernetes-manifests/backend.yaml
+            echo "  type: ClusterIP" >> kubernetes-manifests/backend.yaml
+          fi
+          
+          # Create frontend.yaml if it doesn't exist
+          if [ ! -f "kubernetes-manifests/frontend.yaml" ]; then
+            echo "Creating frontend.yaml"
+            echo "apiVersion: apps/v1" > kubernetes-manifests/frontend.yaml
+            echo "kind: Deployment" >> kubernetes-manifests/frontend.yaml
+            echo "metadata:" >> kubernetes-manifests/frontend.yaml
+            echo "  name: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "  namespace: petshop" >> kubernetes-manifests/frontend.yaml
+            echo "  labels:" >> kubernetes-manifests/frontend.yaml
+            echo "    app: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "spec:" >> kubernetes-manifests/frontend.yaml
+            echo "  replicas: 1" >> kubernetes-manifests/frontend.yaml
+            echo "  selector:" >> kubernetes-manifests/frontend.yaml
+            echo "    matchLabels:" >> kubernetes-manifests/frontend.yaml
+            echo "      app: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "  template:" >> kubernetes-manifests/frontend.yaml
+            echo "    metadata:" >> kubernetes-manifests/frontend.yaml
+            echo "      labels:" >> kubernetes-manifests/frontend.yaml
+            echo "        app: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "    spec:" >> kubernetes-manifests/frontend.yaml
+            echo "      containers:" >> kubernetes-manifests/frontend.yaml
+            echo "      - name: frontend" >> kubernetes-manifests/frontend.yaml
+            echo "        image: petshop-frontend:latest" >> kubernetes-manifests/frontend.yaml
+            echo "        imagePullPolicy: Always" >> kubernetes-manifests/frontend.yaml
+            echo "        ports:" >> kubernetes-manifests/frontend.yaml
+            echo "        - containerPort: 80" >> kubernetes-manifests/frontend.yaml
+            echo "---" >> kubernetes-manifests/frontend.yaml
+            echo "apiVersion: v1" >> kubernetes-manifests/frontend.yaml
+            echo "kind: Service" >> kubernetes-manifests/frontend.yaml
+            echo "metadata:" >> kubernetes-manifests/frontend.yaml
+            echo "  name: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "  namespace: petshop" >> kubernetes-manifests/frontend.yaml
+            echo "spec:" >> kubernetes-manifests/frontend.yaml
+            echo "  selector:" >> kubernetes-manifests/frontend.yaml
+            echo "    app: petshop-frontend" >> kubernetes-manifests/frontend.yaml
+            echo "  ports:" >> kubernetes-manifests/frontend.yaml
+            echo "  - port: 80" >> kubernetes-manifests/frontend.yaml
+            echo "    targetPort: 80" >> kubernetes-manifests/frontend.yaml
+            echo "  type: LoadBalancer" >> kubernetes-manifests/frontend.yaml
           fi
           
           # Update image tags in the Kubernetes manifests
